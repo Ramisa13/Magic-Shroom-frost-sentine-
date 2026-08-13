@@ -14,6 +14,7 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 - **OLED status face** — animated eyes that blink, with an alarmed expression and warning icon during a frost event
 - **MQTT reporting** — publishes temperature, humidity, and status to the Garden Spine network over TLS, and can subscribe to a neighboring node's readings
 - **Active buzzer alert** — audible warning alongside the visual gesture
+- **Motion-triggered welcome wave** — an HC-SR501 PIR sensor detects nearby motion and triggers three servo waves between 45° and 90°, giving the mushroom a welcoming gesture. The feature can be enabled or disabled from the on-device menu.
 
 ## Hardware
 
@@ -27,6 +28,7 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 | SSD1306 OLED (128×64, I2C) | Status display |
 | KY-023 joystick module | On-device threshold menu |
 | 6×1.5V battery pack | Replaced the original 9V battery, which could not supply enough current for the full system |
+| HC-SR501 PIR motion sensor | Detects motion and triggers the optional welcome-wave gesture |
 
 ## Wiring
 
@@ -39,6 +41,7 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 | Joystick Y-axis | GPIO35 |
 | Joystick button | GPIO27 |
 | OLED SDA / SCL | GPIO21 / GPIO22 |
+| HC-SR501 OUT | GPIO33 |
 
 Servo power comes from a separate 5V supply sharing ground with the ESP32 — not from the board's own 3V3/5V pins.
 
@@ -46,11 +49,12 @@ Servo power comes from a separate 5V supply sharing ground with the ESP32 — no
 
 ## How it works
 
-1. The sensor is read on a fixed interval and compared against the current enter/leave thresholds.
-2. A hysteresis state machine decides whether the device is in `warning` or `ok`, only flipping in one direction at a time so it doesn't flicker near the boundary.
-3. The servo steps smoothly toward its warning or rest position, one degree at a time, independent of the sensor's read interval.
-4. The OLED redraws on its own fast timer so the eye-blink animation stays smooth regardless of sensor timing.
-5. Temperature, humidity, and status are published to the Garden Spine MQTT broker over TLS on a slower interval.
+1. The DHT11 sensor is read at a fixed interval and the measured temperature is compared against the current upper and lower temperature limits.
+2. A hysteresis state machine determines whether the device is in `warning` or `ok`, preventing the warning state from flickering near the temperature boundaries.
+3. When enabled, the HC-SR501 PIR sensor detects motion and triggers a three-wave welcome gesture. The servo moves between 45° and 90°, with the waving motion temporarily taking priority over temperature-based servo control.
+4. When no welcome wave is active, the servo moves smoothly toward its temperature-controlled position, one degree at a time, independent of the sensor read interval.
+5. The OLED redraws on its own fast timer so the eye-blink animation stays smooth regardless of sensor timing.
+6. Temperature, humidity, and status are published to the Garden Spine MQTT broker over TLS on a slower interval.
 
 ## CAD / Enclosure
 
