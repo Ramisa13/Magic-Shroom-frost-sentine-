@@ -1,0 +1,87 @@
+# Frost Sentinel — "Magic Shroom" 🍄
+
+An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITEE Summer Programme), disguised as a mushroom mascot. A thermistor/DHT11 sensor watches for frost conditions; when the temperature crosses a threshold, a single servo-driven hand rises as a visible warning flag, an OLED face shows an alarmed expression, and an active buzzer sounds — all reported live over MQTT.
+
+**Device ID:** `fs-01` · **Zone:** `outdoor-1` · **Type:** `frost-node`
+
+<!-- Add a photo or short GIF of the finished mushroom here — this is the first thing anyone sees. -->
+
+## Features
+
+- **Frost hysteresis logic** — separate enter/leave temperature thresholds so the warning state doesn't flicker right at the boundary
+- **One servo, one gesture** — a single hand rises on warning and returns to rest on recovery, moved in small steps rather than an instant jump
+- **On-device threshold menu** — a joystick lets you view and adjust the upper/lower temperature limits live, with a long-press to exit back to the main display
+- **OLED status face** — animated eyes that blink, with an alarmed expression and warning icon during a frost event
+- **MQTT reporting** — publishes temperature, humidity, and status to the Garden Spine network over TLS, and can subscribe to a neighboring node's readings
+- **Active buzzer alert** — audible warning alongside the visual gesture
+
+## Hardware
+
+| Component | Notes |
+|---|---|
+| ESP32 DevKit | Elegoo Super Starter Kit |
+| DHT11 | Temperature/humidity sensor |
+| Thermistor + 10kΩ resistor | Charter-specified sensor (see Known Limitations) |
+| SG90 servo | Drives the single warning gesture |
+| Active buzzer | Drive-on-power, no pitch control |
+| SSD1306 OLED (128×64, I2C) | Status display |
+| KY-023 joystick module | On-device threshold menu |
+| 6×1.5V battery pack | Replaced the original 9V battery, which could not supply enough current for the full system |
+
+## Wiring
+
+| Signal | Pin |
+|---|---|
+| DHT11 data | GPIO4 |
+| Thermistor (ADC) | GPIO34 |
+| Servo signal | GPIO13 |
+| Buzzer + | GPIO25 |
+| Joystick Y-axis | GPIO35 |
+| Joystick button | GPIO27 |
+| OLED SDA / SCL | GPIO21 / GPIO22 |
+
+Servo power comes from a separate 5V supply sharing ground with the ESP32 — not from the board's own 3V3/5V pins.
+
+<!-- Add your wiring diagram image here, e.g. docs/wiring-diagram.png -->
+
+## How it works
+
+1. The sensor is read on a fixed interval and compared against the current enter/leave thresholds.
+2. A hysteresis state machine decides whether the device is in `warning` or `ok`, only flipping in one direction at a time so it doesn't flicker near the boundary.
+3. The servo steps smoothly toward its warning or rest position, one degree at a time, independent of the sensor's read interval.
+4. The OLED redraws on its own fast timer so the eye-blink animation stays smooth regardless of sensor timing.
+5. Temperature, humidity, and status are published to the Garden Spine MQTT broker over TLS on a slower interval.
+
+## Project structure
+
+```
+firmware/
+  frost_sentinel.ino     — main sketch
+  config.example.h       — credential template (copy to config.h, which is gitignored)
+cad/
+  — enclosure design files
+docs/
+  — wiring diagram, notes
+```
+
+## Setup
+
+1. Copy `firmware/config.example.h` to `firmware/config.h` and fill in your own Wi-Fi/MQTT credentials from your course credential slip.
+2. Install the required Arduino libraries: `Adafruit_GFX`, `Adafruit_SSD1306`, `DHT sensor library`, `ESP32Servo`, and `GardenSpine`.
+3. Flash `firmware/frost_sentinel.ino` to an ESP32 board.
+4. Open Serial Monitor at 115200 baud to confirm Wi-Fi and MQTT connect.
+
+## Known limitations
+
+- Currently reads temperature from the DHT11 rather than the thermistor named in the original charter ("Thermistor Threshold Study") — wiring in the thermistor and calibrating it against the DHT11 is still open work.
+- Default thresholds are a starting point, not calibrated frost values — adjust via the on-device menu and validate against real paired sensor data before treating them as final.
+- The remote greenhouse-node subscription is implemented and receiving data but not yet surfaced anywhere in the UI.
+
+## Credits
+
+- Built for the Garden Spine IoT programme (ITEE Summer Programme), gardenspine.ikapo.fi.
+- Enclosure adapted from a public mushroom house model on Printables — see [printables.com/model/1741928](https://www.printables.com/model/1741928-mushroom-house-led-lamp-decoration) for the original design; check the listing's current license terms before reuse.
+
+## License
+
+Firmware and code in this repository are MIT licensed — see [LICENSE](LICENSE). The enclosure CAD/STL files are adapted from a third-party source under its own license terms (see Credits above) and are not covered by the MIT license.

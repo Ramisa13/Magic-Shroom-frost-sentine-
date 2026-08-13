@@ -1,0 +1,13 @@
+# Real credentials — never commit this, use config.example.h as the template
+firmware/config.h
+
+# Arduino IDE / build artifacts
+*.hex
+*.elf
+*.bin
+build/
+.vscode/
+
+# OS clutter
+.DS_Store
+Thumbs.db
