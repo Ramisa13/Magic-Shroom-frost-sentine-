@@ -52,6 +52,19 @@ Servo power comes from a separate 5V supply sharing ground with the ESP32 — no
 4. The OLED redraws on its own fast timer so the eye-blink animation stays smooth regardless of sensor timing.
 5. Temperature, humidity, and status are published to the Garden Spine MQTT broker over TLS on a slower interval.
 
+## CAD / Enclosure
+
+The mushroom enclosure is adapted from a public model on Printables, scaled
+and modified to fit the ESP32, servo, breadboard, and battery:
+
+**Mushroom House LED Lamp Decoration**
+https://www.printables.com/model/1741928-mushroom-house-led-lamp-decoration
+
+Check the listing for current license terms before reuse or redistribution.
+The `cad/` folder in this repo holds only original additions on top of that
+base model (the hand/flag piece, mounting notes, and any modifications made),
+not a copy of the base file itself.
+
 ## Project structure
 
 ```
@@ -59,7 +72,7 @@ firmware/
   frost_sentinel.ino     — main sketch
   config.example.h       — credential template (copy to config.h, which is gitignored)
 cad/
-  — enclosure design files
+  — original design additions (hand/flag piece, mounting notes)
 docs/
   — wiring diagram, notes
 ```
@@ -80,8 +93,8 @@ docs/
 ## Credits
 
 - Built for the Garden Spine IoT programme (ITEE Summer Programme), gardenspine.ikapo.fi.
-- Enclosure adapted from a public mushroom house model on Printables — see [printables.com/model/1741928](https://www.printables.com/model/1741928-mushroom-house-led-lamp-decoration) for the original design; check the listing's current license terms before reuse.
+- Enclosure adapted from a public mushroom house model on Printables — see the CAD / Enclosure section above for the link and license note.
 
 ## License
 
-Firmware and code in this repository are MIT licensed — see [LICENSE](LICENSE). The enclosure CAD/STL files are adapted from a third-party source under its own license terms (see Credits above) and are not covered by the MIT license.
+Firmware and code in this repository are MIT licensed — see [LICENSE](LICENSE). The enclosure design is derived from a third-party model under its own license terms (see CAD / Enclosure above) and is not covered by the MIT license.
