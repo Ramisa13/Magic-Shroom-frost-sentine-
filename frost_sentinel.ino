@@ -3,13 +3,17 @@
 #include <Adafruit_SSD1306.h>
 #include <DHT.h>
 #include <ESP32Servo.h>
-#include "config.h"
 #include <GardenSpine.h>
 
 // --- Pins ---
 const int DHT_PIN = 4;
 const int SERVO_PIN = 13;
-const int BUZZER_PIN = 25;   // active buzzer — drive-on-power, no tone()
+// HC-SR501 OUT. GPIO33 is input-only, which is ideal for this digital sensor
+// and does not conflict with the pins already used below.
+const int PIR_PIN = 33;
+// Connect the buzzer signal pin here. Change 26 if your buzzer is wired to
+// another free ESP32 GPIO.
+const int BUZZER_PIN = 25;
 
 // ----- Joystick -----
 const int JOY_Y_PIN = 35;
@@ -40,8 +44,6 @@ enum MenuState {
 MenuState menuState = MENU_OFF;
 int selectedMenu = 0;
 
-// Defaults — recalibrate against real paired sensor data before treating
-// these as final frost thresholds. Editable live via the on-device menu.
 float upperTempLimit = 30.0;
 float lowerTempLimit = 1.0;
 
@@ -71,21 +73,33 @@ const unsigned char PROGMEM flakeIcon[] = {
   0x6b, 0xd6, 0x17, 0xd0, 0x24, 0x48, 0x47, 0xc4, 0x0c, 0x60, 0x14, 0x50, 0x04, 0x20, 0x00, 0x00
 };
 
-// Servo stays within 20-160 degrees per the course's safe-range rule.
+const int REST_ANGLE = 30;
+const int WARNING_ANGLE = 150;
 const int SERVO_CLOSED_ANGLE = 20;
 const int SERVO_OPEN_ANGLE = 110;
 
-// Optional: the neighboring greenhouse team's temperature. Currently
-// received and stored but not yet shown anywhere — wire it into drawScreen()
-// if you want it displayed as a cross-reference on the OLED.
+// A motion event temporarily takes control of the servo.  It performs three
+// waves from 45 to 90 degrees, then temperature control resumes.
+const int WAVE_LOW_ANGLE = 45;
+const int WAVE_HIGH_ANGLE = 90;
+const int WAVE_COUNT = 3;
+
+// Temperature received from the other Greenhouse Microclimate Mapper node.
 const char* REMOTE_TEMP_TOPIC =
   "garden/greenhouse-1/climate-node/gm-01/temperature";
+// The remote node normally publishes every minute, so two missed messages
+// puts the servo in its safe, open position.
 const unsigned long REMOTE_MESSAGE_TIMEOUT_MS = 120000;
 
 bool inWarning = false;
 int currentAngle = SERVO_OPEN_ANGLE;
 unsigned long lastStepMs = 0;
 const unsigned long STEP_INTERVAL_MS = 30;
+
+bool pirWasHigh = false;
+bool motionWaveActive = false;
+bool waveAtHighAngle = false;
+int completedWaves = 0;
 
 float remoteTempC = 0;
 bool remoteMessageReceived = false;
@@ -108,12 +122,15 @@ const unsigned long BLINK_DURATION_MS = 150;
 unsigned long lastDrawMs = 0;
 const unsigned long DRAW_INTERVAL_MS = 50;
 
-// Active buzzer — drive-on-power only, no pitch control.
+// This is for a passive piezo buzzer. An active buzzer can instead use
+// digitalWrite(BUZZER_PIN, HIGH/LOW) in this function.
 void setBuzzer(bool enabled) {
   static bool buzzerOn = false;
   if (enabled == buzzerOn) return;
+
   buzzerOn = enabled;
-  digitalWrite(BUZZER_PIN, enabled ? HIGH : LOW);
+  if (enabled) tone(BUZZER_PIN, 2000);  // 2 kHz warning tone
+  else noTone(BUZZER_PIN);
 }
 
 void IRAM_ATTR joystickISR() {
@@ -256,6 +273,35 @@ void stepServoToward(int target) {
   cap.write(currentAngle);
 }
 
+// Start once per PIR HIGH period.  The HC-SR501 stays HIGH for its configured
+// delay, so this prevents a new wave from starting repeatedly while it is HIGH.
+void handleMotionWave() {
+  bool motionDetected = digitalRead(PIR_PIN) == HIGH;
+  if (motionDetected && !pirWasHigh && !motionWaveActive) {
+    motionWaveActive = true;
+    waveAtHighAngle = false;
+    completedWaves = 0;
+    Serial.println("Motion detected: waving");
+  }
+  pirWasHigh = motionDetected;
+
+  if (!motionWaveActive) return;
+
+  int waveTarget = waveAtHighAngle ? WAVE_HIGH_ANGLE : WAVE_LOW_ANGLE;
+  stepServoToward(waveTarget);
+  if (currentAngle != waveTarget) return;
+
+  if (waveAtHighAngle) {
+    completedWaves++;
+    waveAtHighAngle = false;
+  } else if (completedWaves >= WAVE_COUNT) {
+    motionWaveActive = false;
+    Serial.println("Wave complete");
+  } else {
+    waveAtHighAngle = true;
+  }
+}
+
 // GardenSpine calls this whenever gm-01 publishes on REMOTE_TEMP_TOPIC.
 // A GardenSpine payload includes a JSON field such as: "value":22.8
 void handleRemoteTemperature(const char* topic, const char* message) {
@@ -331,14 +377,16 @@ void drawScreen() {
 
 void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
+  noTone(BUZZER_PIN);
+
+  pinMode(PIR_PIN, INPUT);
 
   pinMode(JOY_SW_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(JOY_SW_PIN), joystickISR, CHANGE);
   Serial.begin(115200);
 
   cap.attach(SERVO_PIN);
-  cap.write(SERVO_OPEN_ANGLE);  // Safe state on boot.
+  cap.write(SERVO_OPEN_ANGLE);  // Safe state until a remote message arrives.
 
   dht.begin();
   delay(2000);
@@ -391,16 +439,19 @@ void loop() {
     }
   }
 
-  // Actuate the servo from this device's own most recent temperature.
-  // The hand/vent opens outside the selected range and closes within it.
-  // If the sensor has no valid current reading, stay in the safe/open state.
+  // Actuate the servo from this device's most recent DHT11 temperature.
+  // The vent opens outside the selected range and closes within the range.
+  // If the DHT11 has no valid current reading, leave the vent open safely.
   bool localOutsideLimits = !sensorOk ||
                             lastTempC < lowerTempLimit ||
                             lastTempC > upperTempLimit;
   int servoTarget = localOutsideLimits
                     ? SERVO_OPEN_ANGLE
                     : SERVO_CLOSED_ANGLE;
-  stepServoToward(servoTarget);
+  // Motion waving has priority; otherwise the servo remains a temperature
+  // controlled vent.
+  handleMotionWave();
+  if (!motionWaveActive) stepServoToward(servoTarget);
 
   if (spine.connected() && (millis() - lastPublishMs >= PUBLISH_MS || lastPublishMs == 0)) {
     lastPublishMs = millis();
