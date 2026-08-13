@@ -46,6 +46,8 @@ int selectedMenu = 0;
 
 float upperTempLimit = 30.0;
 float lowerTempLimit = 1.0;
+// The motion-triggered greeting is opt-in and starts disabled.
+bool welcomeWaveEnabled = false;
 
 unsigned long lastMenuActivity = 0;
 const unsigned long MENU_TIMEOUT_MS = 120000;
@@ -174,9 +176,13 @@ void drawMenu() {
   display.setCursor(0, 25);
   display.print(selectedMenu == 0 ? ">" : " ");
   display.print(" Set Upper Temp");
-  display.setCursor(0, 45);
+  display.setCursor(0, 36);
   display.print(selectedMenu == 1 ? ">" : " ");
   display.print(" Set Lower Temp");
+  display.setCursor(0, 47);
+  display.print(selectedMenu == 2 ? ">" : " ");
+  display.print(" Welcome Wave: ");
+  display.print(welcomeWaveEnabled ? "ON" : "OFF");
   display.setCursor(0, 57);
   display.print("Hold: exit");
   display.display();
@@ -222,7 +228,12 @@ void handleJoystickMenu() {
           break;
         case MENU_SELECT:
           if (selectedMenu == 0) menuState = MENU_EDIT_UPPER;
-          else menuState = MENU_EDIT_LOWER;
+          else if (selectedMenu == 1) menuState = MENU_EDIT_LOWER;
+          else {
+            welcomeWaveEnabled = !welcomeWaveEnabled;
+            // Turning it off also stops a wave already in progress.
+            if (!welcomeWaveEnabled) motionWaveActive = false;
+          }
           break;
         case MENU_EDIT_UPPER:
         case MENU_EDIT_LOWER:
@@ -242,13 +253,13 @@ void handleJoystickMenu() {
   if (menuState == MENU_SELECT) {
     if (joyUp) {
       selectedMenu--;
-      if (selectedMenu < 0) selectedMenu = 1;
+      if (selectedMenu < 0) selectedMenu = 2;
       lastJoyMove = millis();
       lastMenuActivity = millis();
     }
     if (joyDown) {
       selectedMenu++;
-      if (selectedMenu > 1) selectedMenu = 0;
+      if (selectedMenu > 2) selectedMenu = 0;
       lastJoyMove = millis();
       lastMenuActivity = millis();
     }
@@ -277,6 +288,12 @@ void stepServoToward(int target) {
 // delay, so this prevents a new wave from starting repeatedly while it is HIGH.
 void handleMotionWave() {
   bool motionDetected = digitalRead(PIR_PIN) == HIGH;
+  if (!welcomeWaveEnabled) {
+    motionWaveActive = false;
+    pirWasHigh = motionDetected;
+    return;
+  }
+
   if (motionDetected && !pirWasHigh && !motionWaveActive) {
     motionWaveActive = true;
     waveAtHighAngle = false;
