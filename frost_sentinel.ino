@@ -8,11 +8,10 @@
 // --- Pins ---
 const int DHT_PIN = 4;
 const int SERVO_PIN = 13;
-// HC-SR501 OUT. GPIO33 is input-only, which is ideal for this digital sensor
-// and does not conflict with the pins already used below.
-const int PIR_PIN = 33;
-// Connect the buzzer signal pin here. Change 26 if your buzzer is wired to
-// another free ESP32 GPIO.
+// HC-SR04 TRIG/ECHO. ECHO idles at 5V, so it must go through a voltage
+// divider (e.g. 1k/2k) before reaching this 3.3V-only GPIO.
+const int TRIG_PIN = 26;
+const int ECHO_PIN = 14;
 const int BUZZER_PIN = 25;
 
 // ----- Joystick -----
@@ -98,7 +97,16 @@ int currentAngle = SERVO_OPEN_ANGLE;
 unsigned long lastStepMs = 0;
 const unsigned long STEP_INTERVAL_MS = 30;
 
-bool pirWasHigh = false;
+// HC-SR04 needs a rest between pings, and a round trip beyond this range
+// (~5 m) is treated as no echo rather than blocking pulseIn() indefinitely.
+const unsigned long DISTANCE_SAMPLE_MS = 100;
+const unsigned long ECHO_TIMEOUT_US = 30000;
+const float DISTANCE_CHANGE_THRESHOLD_CM = 10.0;
+
+unsigned long lastDistanceSampleMs = 0;
+float baselineDistanceCm = 0;
+bool haveBaselineDistance = false;
+
 bool motionWaveActive = false;
 bool waveAtHighAngle = false;
 int completedWaves = 0;
@@ -284,23 +292,50 @@ void stepServoToward(int target) {
   cap.write(currentAngle);
 }
 
-// Start once per PIR HIGH period.  The HC-SR501 stays HIGH for its configured
-// delay, so this prevents a new wave from starting repeatedly while it is HIGH.
+// Sends a trigger pulse and times the echo. Returns -1 if no echo came back
+// within ECHO_TIMEOUT_US (out of range or a misread), instead of blocking.
+float readDistanceCm() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  unsigned long durationUs = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
+  if (durationUs == 0) return -1;
+  return durationUs / 58.0;  // Speed of sound: ~58 us per round-trip cm.
+}
+
+// Waves once whenever a fresh reading differs from the last known-good
+// reading by more than DISTANCE_CHANGE_THRESHOLD_CM. The baseline is frozen
+// while a wave is in progress so its own approach/retreat can't retrigger it,
+// and invalid (timed-out) readings are skipped rather than treated as a
+// change.
 void handleMotionWave() {
-  bool motionDetected = digitalRead(PIR_PIN) == HIGH;
   if (!welcomeWaveEnabled) {
     motionWaveActive = false;
-    pirWasHigh = motionDetected;
     return;
   }
 
-  if (motionDetected && !pirWasHigh && !motionWaveActive) {
-    motionWaveActive = true;
-    waveAtHighAngle = false;
-    completedWaves = 0;
-    Serial.println("Motion detected: waving");
+  if (millis() - lastDistanceSampleMs >= DISTANCE_SAMPLE_MS) {
+    lastDistanceSampleMs = millis();
+    float distanceCm = readDistanceCm();
+
+    if (distanceCm > 0) {
+      if (!haveBaselineDistance) {
+        baselineDistanceCm = distanceCm;
+        haveBaselineDistance = true;
+      } else if (!motionWaveActive) {
+        if (fabs(distanceCm - baselineDistanceCm) > DISTANCE_CHANGE_THRESHOLD_CM) {
+          motionWaveActive = true;
+          waveAtHighAngle = false;
+          completedWaves = 0;
+          Serial.println("Distance change detected: waving");
+        }
+        baselineDistanceCm = distanceCm;
+      }
+    }
   }
-  pirWasHigh = motionDetected;
 
   if (!motionWaveActive) return;
 
@@ -396,7 +431,9 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   noTone(BUZZER_PIN);
 
-  pinMode(PIR_PIN, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  digitalWrite(TRIG_PIN, LOW);
+  pinMode(ECHO_PIN, INPUT);
 
   pinMode(JOY_SW_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(JOY_SW_PIN), joystickISR, CHANGE);

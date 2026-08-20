@@ -14,7 +14,7 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 - **OLED status face** — animated eyes that blink, with an alarmed expression and warning icon during a frost event
 - **MQTT reporting** — publishes temperature, humidity, and status to the Garden Spine network over TLS, and can subscribe to a neighboring node's readings
 - **Active buzzer alert** — audible warning alongside the visual gesture
-- **Motion-triggered welcome wave** — an HC-SR501 PIR sensor detects nearby motion and triggers three servo waves between 45° and 90°, giving the mushroom a welcoming gesture. The feature can be enabled or disabled from the on-device menu.
+- **Distance-triggered welcome wave** — an HC-SR04 ultrasonic sensor watches the distance to whatever is in front of it; a change of more than 10 cm from its last reading triggers three servo waves between 45° and 90°, giving the mushroom a welcoming gesture. Invalid (no-echo) readings are ignored rather than treated as a change. The feature can be enabled or disabled from the on-device menu.
 
 ## Hardware
 
@@ -28,7 +28,7 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 | SSD1306 OLED (128×64, I2C) | Status display |
 | KY-023 joystick module | On-device threshold menu |
 | 6×1.5V battery pack | Replaced the original 9V battery, which could not supply enough current for the full system |
-| HC-SR501 PIR motion sensor | Detects motion and triggers the optional welcome-wave gesture |
+| HC-SR04 ultrasonic distance sensor | Detects a distance change and triggers the optional welcome-wave gesture |
 
 ## Wiring
 
@@ -41,9 +41,12 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 | Joystick Y-axis | GPIO35 |
 | Joystick button | GPIO27 |
 | OLED SDA / SCL | GPIO21 / GPIO22 |
-| HC-SR501 OUT | GPIO33 |
+| HC-SR04 TRIG | GPIO26 |
+| HC-SR04 ECHO | GPIO14 (through a voltage divider, see below) |
 
 Servo power comes from a separate 5V supply sharing ground with the ESP32 — not from the board's own 3V3/5V pins.
+
+The HC-SR04 runs on 5V and its ECHO output idles at 5V, which exceeds the ESP32's 3.3V-only GPIO input tolerance. Put a voltage divider (e.g. 1kΩ in series, then 2kΩ to GND) between ECHO and GPIO14 to bring the pulse down to a safe ~3.3V. TRIG is driven by the ESP32 at 3.3V, which the HC-SR04 reads fine as logic-high, so no divider is needed on that line.
 
 <!-- Add your wiring diagram image here, e.g. docs/wiring-diagram.png -->
 
@@ -51,7 +54,7 @@ Servo power comes from a separate 5V supply sharing ground with the ESP32 — no
 
 1. The DHT11 sensor is read at a fixed interval and the measured temperature is compared against the current upper and lower temperature limits.
 2. A hysteresis state machine determines whether the device is in `warning` or `ok`, preventing the warning state from flickering near the temperature boundaries.
-3. When enabled, the HC-SR501 PIR sensor detects motion and triggers a three-wave welcome gesture. The servo moves between 45° and 90°, with the waving motion temporarily taking priority over temperature-based servo control.
+3. When enabled, the HC-SR04 is sampled periodically; if a valid reading differs from the last known-good reading by more than 10 cm, a three-wave welcome gesture starts. The servo moves between 45° and 90°, with the waving motion temporarily taking priority over temperature-based servo control.
 4. When no welcome wave is active, the servo moves smoothly toward its temperature-controlled position, one degree at a time, independent of the sensor read interval.
 5. The OLED redraws on its own fast timer so the eye-blink animation stays smooth regardless of sensor timing.
 6. Temperature, humidity, and status are published to the Garden Spine MQTT broker over TLS on a slower interval.
