@@ -4,6 +4,10 @@ An ESP32-based frost-warning device for the Garden Spine IoT garden network (ITE
 
 **Device ID:** `fs-01` · **Zone:** `outdoor-1` · **Type:** `frost-node`
 
+<p align="center">
+  <img src="docs/images/mushroom.jpg" alt="Frost Sentinel Magic Shroom device" width="420">
+</p
+
 <!-- Add a photo or short GIF of the finished mushroom here — this is the first thing anyone sees. -->
 
 ## Features
